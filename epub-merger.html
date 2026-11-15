@@ -1,0 +1,753 @@
+<title>EPUB 合併器</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Noto+Sans+TC:wght@400;500;700&family=Space+Grotesk:wght@500;700&family=JetBrains+Mono:wght@400&display=swap">
+<style>
+/* Layout: one-column workbench. Files in reading order, then output settings, then merge and result. */
+:root {
+  --bg: #F3F5F8;
+  --surface: #FFFFFF;
+  --line: #D8DEE6;
+  --fg: #18212C;
+  --muted: #586374;
+  --accent: #1B6B75;
+  --accent-fg: #FFFFFF;
+  --accent-soft: #E1EFF1;
+  --warn-fg: #7A4A00;
+  --warn-bg: #FFF1D6;
+  --err-fg: #A8231B;
+  --err-bg: #FDE8E6;
+  --font-body: "Inter", "Noto Sans TC", system-ui, -apple-system, "PingFang TC", "Microsoft JhengHei", sans-serif;
+  --font-display: "Space Grotesk", "Noto Sans TC", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #11161C;
+    --surface: #18202A;
+    --line: #2B3644;
+    --fg: #E6EBF1;
+    --muted: #9AA7B7;
+    --accent: #5CC0CB;
+    --accent-fg: #0B1A1D;
+    --accent-soft: #16323A;
+    --warn-fg: #E8B35A;
+    --warn-bg: #2E2411;
+    --err-fg: #FF9A91;
+    --err-bg: #3A1B19;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #11161C;
+  --surface: #18202A;
+  --line: #2B3644;
+  --fg: #E6EBF1;
+  --muted: #9AA7B7;
+  --accent: #5CC0CB;
+  --accent-fg: #0B1A1D;
+  --accent-soft: #16323A;
+  --warn-fg: #E8B35A;
+  --warn-bg: #2E2411;
+  --err-fg: #FF9A91;
+  --err-bg: #3A1B19;
+  color-scheme: dark;
+}
+
+* { box-sizing: border-box; }
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 15px/1.65 var(--font-body);
+  padding-block: 28px 56px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 760px; margin: 0 auto; display: grid; gap: 18px; }
+h1 { font: 700 28px/1.2 var(--font-display); margin: 0 0 8px; text-wrap: balance; }
+h2 { font: 700 17px/1.3 var(--font-display); margin: 0; }
+.lede { margin: 0; color: var(--muted); max-width: 62ch; }
+
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: 10px; padding: 18px; min-width: 0; }
+.panel-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+.tools { display: flex; flex-wrap: wrap; gap: 8px; }
+
+button {
+  font: inherit; font-size: 14px; color: var(--fg); background: var(--surface);
+  border: 1px solid var(--line); border-radius: 8px; padding: 7px 13px; cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button:disabled { opacity: .45; cursor: not-allowed; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); font-weight: 600; padding: 10px 20px; }
+button.primary:hover:not(:disabled) { color: var(--accent-fg); filter: brightness(1.08); }
+button:focus-visible, input:focus-visible, .drop:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.drop {
+  border: 1.5px dashed var(--line); border-radius: 10px; padding: 18px 14px; text-align: center;
+  color: var(--muted); cursor: pointer;
+}
+.drop strong { color: var(--fg); font-weight: 600; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); color: var(--fg); }
+
+.list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 10px; }
+.empty { margin: 14px 0 0; color: var(--muted); font-size: 14px; }
+.book {
+  display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 12px; align-items: start;
+  border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+}
+.num {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--accent-soft); color: var(--accent); font: 700 14px var(--font-display);
+  font-variant-numeric: tabular-nums;
+}
+.fname { font-weight: 600; overflow-wrap: anywhere; }
+.meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.labelrow { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.labelrow label { font-size: 13px; color: var(--muted); }
+.labelrow input { flex: 1 1 180px; min-width: 0; }
+.row-actions { display: flex; gap: 6px; }
+.row-actions button { width: 34px; height: 34px; padding: 0; display: grid; place-items: center; }
+
+.fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 14px; }
+.field { display: grid; gap: 4px; min-width: 0; }
+.field label, .check { font-size: 13px; color: var(--muted); }
+input[type="text"] {
+  font: inherit; font-size: 14px; color: var(--fg); background: var(--bg);
+  border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%;
+}
+.check { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; color: var(--fg); font-size: 14px; }
+.check input { margin-top: 5px; accent-color: var(--accent); }
+.check small { display: block; color: var(--muted); font-size: 13px; }
+
+#status {
+  margin-top: 14px; padding: 10px 12px; border-radius: 8px; background: var(--accent-soft);
+  white-space: pre-line; font-size: 14px; overflow-wrap: anywhere;
+}
+#status[data-kind="error"] { background: var(--err-bg); color: var(--err-fg); }
+.warns { margin: 14px 0 0; padding: 10px 12px 10px 28px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-fg); font-size: 14px; }
+.warns li { margin: 2px 0; overflow-wrap: anywhere; }
+
+.result { margin-top: 16px; display: grid; gap: 14px; }
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; margin: 0; }
+.stats div { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; }
+.stats dt { font-size: 12px; color: var(--muted); letter-spacing: .04em; }
+.stats dd { margin: 0; font: 700 20px var(--font-display); font-variant-numeric: tabular-nums; }
+.dl-row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: center; }
+.fn { font-family: var(--font-mono); font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.hint { font-size: 13px; color: var(--muted); margin: 0; }
+
+details { font-size: 14px; color: var(--muted); }
+details summary { cursor: pointer; color: var(--fg); font-weight: 600; }
+details p { margin: 8px 0 0; max-width: 66ch; }
+
+@media (max-width: 480px) {
+  .book { grid-template-columns: 30px minmax(0, 1fr); }
+  .row-actions { grid-column: 1 / -1; justify-content: flex-end; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<main class="wrap">
+  <header>
+    <h1>EPUB 合併器</h1>
+    <p class="lede">把同一本書拆開的多個 EPUB，依你排好的順序接成一本。每個檔案的章節與圖片各自獨立存放，目錄會重新產生。檔案只在這個瀏覽器內處理，不會上傳。</p>
+  </header>
+
+  <section class="panel" aria-labelledby="h-files">
+    <div class="panel-head">
+      <h2 id="h-files">1. 檔案與閱讀順序</h2>
+      <div class="tools">
+        <button type="button" id="btn-sort">依檔名排序</button>
+        <button type="button" id="btn-demo">載入範例檔</button>
+      </div>
+    </div>
+    <div class="drop" id="drop" role="button" tabindex="0" aria-label="選擇 EPUB 檔案">
+      <strong>拖曳 .epub 到這裡</strong>，或點一下選擇檔案（可多選）
+      <input type="file" id="file" accept=".epub,application/epub+zip" multiple hidden>
+    </div>
+    <p class="empty" id="empty">還沒有檔案。可以先按「載入範例檔」看看流程，範例的順序是故意打亂的。</p>
+    <ol class="list" id="list"></ol>
+  </section>
+
+  <section class="panel" aria-labelledby="h-out">
+    <div class="panel-head"><h2 id="h-out">2. 輸出設定</h2></div>
+    <div class="fields">
+      <div class="field"><label for="m-title">書名</label><input type="text" id="m-title" autocomplete="off"></div>
+      <div class="field"><label for="m-author">作者</label><input type="text" id="m-author" autocomplete="off"></div>
+      <div class="field"><label for="m-lang">語言代碼</label><input type="text" id="m-lang" placeholder="zh-TW" autocomplete="off"></div>
+    </div>
+    <label class="check" for="o-group">
+      <input type="checkbox" id="o-group" checked>
+      <span>目錄依檔案分組<small>每個檔案成為一個目錄區塊，底下保留原本的章節。取消勾選則所有章節攤平成同一層。</small></span>
+    </label>
+  </section>
+
+  <section class="panel" aria-labelledby="h-merge">
+    <div class="panel-head"><h2 id="h-merge">3. 合併</h2></div>
+    <div class="dl-row">
+      <button type="button" class="primary" id="btn-merge" disabled>合併成一個 EPUB</button>
+      <span class="hint" id="merge-hint">至少需要兩個檔案。</span>
+    </div>
+    <div id="status" role="status" aria-live="polite" hidden></div>
+    <ul class="warns" id="warns" hidden></ul>
+    <div class="result" id="result" hidden>
+      <dl class="stats" id="stats"></dl>
+      <div class="dl-row">
+        <button type="button" class="primary" id="btn-dl">下載 EPUB</button>
+        <span class="fn" id="out-name"></span>
+      </div>
+      <p class="hint" id="dl-hint" hidden>這個環境沒有提供下載功能。把這個頁面另存成 HTML 檔，在本機瀏覽器開啟就能下載。</p>
+    </div>
+  </section>
+
+  <details>
+    <summary>運作方式</summary>
+    <p>每個 EPUB 的所有檔案原封不動放進獨立資料夾（b1/、b2/、b3/），所以不同書裡同名的 ch1.xhtml、style.css 不會互相覆蓋，內部連結也不必改寫。程式只重新產生 content.opf（清單與閱讀順序）、nav.xhtml 與 toc.ncx（目錄），並照規範把 mimetype 放在壓縮檔第一個、不壓縮。輸出為 EPUB 3，同時附上 EPUB 2 目錄以相容舊閱讀器。</p>
+  </details>
+</main>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script>
+(function () {
+  'use strict';
+
+  var $ = function (s) { return document.querySelector(s); };
+  var esc = function (s) {
+    return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+  };
+  var els = function (n, name) { return Array.prototype.slice.call(n.getElementsByTagNameNS('*', name)); };
+  var kids = function (n, name) { return Array.prototype.filter.call(n.children, function (c) { return c.localName === name; }); };
+  var dirOf = function (p) { var i = p.lastIndexOf('/'); return i >= 0 ? p.slice(0, i + 1) : ''; };
+  var encPath = function (p) { return p.split('/').map(encodeURIComponent).join('/'); };
+  var tick = function () { return new Promise(function (r) { setTimeout(r, 0); }); };
+  function safeDecode(s) { try { return decodeURIComponent(s); } catch (e) { return s; } }
+  function normPath(p) {
+    var out = [];
+    p.split('/').forEach(function (s) {
+      if (!s || s === '.') return;
+      if (s === '..') out.pop(); else out.push(s);
+    });
+    return out.join('/');
+  }
+  function resolveHref(baseDir, href) {
+    var i = href.indexOf('#');
+    var p = i < 0 ? href : href.slice(0, i);
+    var frag = i < 0 ? '' : href.slice(i + 1);
+    if (!p || /^[a-z][a-z0-9+.-]*:/i.test(p)) return { path: null, frag: '' };
+    return { path: normPath(baseDir + safeDecode(p)), frag: frag };
+  }
+  function fmtSize(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1048576).toFixed(1) + ' MB';
+  }
+  function parseXml(text, mime) {
+    var doc = new DOMParser().parseFromString(text.replace(/^﻿/, ''), mime || 'application/xml');
+    if (doc.getElementsByTagName('parsererror').length) throw new Error('XML 解析失敗');
+    return doc;
+  }
+  function uuid() {
+    if (window.crypto && crypto.randomUUID) return crypto.randomUUID();
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+      var r = Math.random() * 16 | 0;
+      return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+    });
+  }
+
+  /* ---------- reading one EPUB ---------- */
+
+  function tocFromNcx(text, baseDir) {
+    var doc = parseXml(text);
+    var nm = els(doc, 'navMap')[0];
+    if (!nm) return [];
+    function walk(np) {
+      var lab = kids(np, 'navLabel')[0];
+      var t = lab ? (kids(lab, 'text')[0] || lab).textContent.replace(/\s+/g, ' ').trim() : '';
+      var ct = kids(np, 'content')[0];
+      var r = ct && ct.getAttribute('src') ? resolveHref(baseDir, ct.getAttribute('src')) : { path: null, frag: '' };
+      return { title: t, path: r.path, frag: r.frag, children: kids(np, 'navPoint').map(walk) };
+    }
+    return kids(nm, 'navPoint').map(walk);
+  }
+
+  function tocFromNav(text, baseDir) {
+    var doc;
+    try { doc = parseXml(text, 'application/xhtml+xml'); }
+    catch (e) { doc = new DOMParser().parseFromString(text, 'text/html'); }
+    var navs = els(doc, 'nav');
+    var nav = navs.filter(function (n) { return (n.getAttribute('epub:type') || '').split(/\s+/).indexOf('toc') >= 0; })[0] || navs[0];
+    if (!nav) return [];
+    var top = els(nav, 'ol')[0];
+    if (!top) return [];
+    function walk(ol) {
+      return kids(ol, 'li').map(function (li) {
+        var a = kids(li, 'a')[0];
+        var sp = kids(li, 'span')[0];
+        var src = a || sp;
+        var title = src ? src.textContent.replace(/\s+/g, ' ').trim() : '';
+        var r = a && a.getAttribute('href') ? resolveHref(baseDir, a.getAttribute('href')) : { path: null, frag: '' };
+        var sub = kids(li, 'ol')[0];
+        return { title: title, path: r.path, frag: r.frag, children: sub ? walk(sub) : [] };
+      });
+    }
+    return walk(top);
+  }
+
+  function countToc(nodes) {
+    return nodes.reduce(function (n, x) { return n + 1 + countToc(x.children); }, 0);
+  }
+
+  async function readBook(file) {
+    var zip = await JSZip.loadAsync(file);
+    var c = zip.file('META-INF/container.xml');
+    if (!c) throw new Error('缺少 META-INF/container.xml，這可能不是 EPUB');
+    var rf = els(parseXml(await c.async('string')), 'rootfile')[0];
+    if (!rf) throw new Error('container.xml 沒有指定 OPF');
+    var opfPath = rf.getAttribute('full-path') || '';
+    var opfFile = zip.file(opfPath) || zip.file(safeDecode(opfPath));
+    if (!opfFile) throw new Error('找不到 OPF：' + opfPath);
+    var opf = parseXml(await opfFile.async('string'));
+    var opfDir = dirOf(opfFile.name);
+    var mdEl = els(opf, 'metadata')[0];
+    function dc(n) { var e = mdEl ? els(mdEl, n)[0] : null; return e ? e.textContent.trim() : ''; }
+
+    var items = {};
+    els(opf, 'item').forEach(function (e) {
+      var id = e.getAttribute('id');
+      var href = e.getAttribute('href');
+      if (!id || !href) return;
+      var r = resolveHref(opfDir, href);
+      if (!r.path) return;
+      items[id] = {
+        id: id, path: r.path,
+        type: e.getAttribute('media-type') || 'application/octet-stream',
+        props: (e.getAttribute('properties') || '').split(/\s+/).filter(Boolean),
+        fallback: e.getAttribute('fallback'),
+        mo: e.getAttribute('media-overlay')
+      };
+    });
+    var all = Object.keys(items).map(function (k) { return items[k]; });
+    var spineEl = els(opf, 'spine')[0];
+    var spine = spineEl ? kids(spineEl, 'itemref').map(function (r) {
+      return { idref: r.getAttribute('idref'), linear: r.getAttribute('linear') };
+    }) : [];
+    var tocId = spineEl && spineEl.getAttribute('toc');
+    var navItem = all.filter(function (it) { return it.props.indexOf('nav') >= 0; })[0] || null;
+    var ncxItem = (tocId && items[tocId]) || all.filter(function (it) { return it.type === 'application/x-dtbncx+xml'; })[0] || null;
+
+    var coverId = null;
+    var cm = els(opf, 'meta').filter(function (m) { return m.getAttribute('name') === 'cover'; })[0];
+    if (cm) coverId = cm.getAttribute('content');
+    var ci = all.filter(function (it) { return it.props.indexOf('cover-image') >= 0; })[0];
+    if (ci) coverId = ci.id;
+
+    var toc = null;
+    if (navItem && zip.file(navItem.path)) {
+      try { toc = tocFromNav(await zip.file(navItem.path).async('string'), dirOf(navItem.path)); } catch (e) { toc = null; }
+    }
+    if ((!toc || !toc.length) && ncxItem && zip.file(ncxItem.path)) {
+      try { toc = tocFromNcx(await zip.file(ncxItem.path).async('string'), dirOf(ncxItem.path)); } catch (e) { toc = null; }
+    }
+    toc = toc || [];
+
+    return {
+      file: file, name: file.name, zip: zip,
+      version: (opf.documentElement.getAttribute('version') || '2.0').charAt(0),
+      title: dc('title'), author: dc('creator'), lang: dc('language'),
+      items: items, spine: spine, navItem: navItem, ncxItem: ncxItem, coverId: coverId,
+      toc: toc, tocCount: countToc(toc)
+    };
+  }
+
+  /* ---------- merging ---------- */
+
+  var CONTAINER = '<?xml version="1.0" encoding="UTF-8"?>\n<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>';
+
+  function firstHref(n) {
+    if (n.href) return n.href;
+    for (var i = 0; i < n.children.length; i++) { var h = firstHref(n.children[i]); if (h) return h; }
+    return null;
+  }
+
+  async function mergeBooks(books, opts, progress) {
+    var out = new JSZip();
+    function put(path, data) { out.file(path, data, { createFolders: false }); }
+    out.file('mimetype', 'application/epub+zip', { compression: 'STORE', createFolders: false });
+    put('META-INF/container.xml', CONTAINER);
+
+    var manifest = [], spineRefs = [], tocTop = [], warnings = [];
+    var ids = {};
+    var stats = { books: books.length, files: 0, spine: 0, toc: 0 };
+    var coverMeta = '';
+
+    for (var i = 0; i < books.length; i++) {
+      var b = books[i];
+      var pre = 'b' + (i + 1) + '/';
+      var idp = 'b' + (i + 1) + '_';
+      progress('處理第 ' + (i + 1) + ' / ' + books.length + ' 個檔案：' + b.name);
+      await tick();
+
+      var copied = {};
+      var idToHref = {};
+      var keys = Object.keys(b.items);
+      for (var k = 0; k < keys.length; k++) {
+        var it = b.items[keys[k]];
+        if (it === b.navItem || it === b.ncxItem) continue;
+        var zf = b.zip.file(it.path);
+        if (!zf) { warnings.push('「' + b.name + '」清單中的 ' + it.path + ' 在壓縮檔內不存在，已略過。'); continue; }
+        var href = pre + encPath(it.path);
+        var props = it.props.filter(function (p) { return p !== 'nav' && !(p === 'cover-image' && i > 0); });
+        manifest.push({ id: idp + it.id, href: href, type: it.type, props: props, fallback: it.fallback ? idp + it.fallback : null, mo: it.mo ? idp + it.mo : null });
+        ids[idp + it.id] = true;
+        idToHref[it.id] = href;
+        copied[it.path] = true;
+        put('OEBPS/' + pre + it.path, await zf.async('uint8array'));
+        stats.files++;
+      }
+
+      var first = null;
+      b.spine.forEach(function (r) {
+        if (!ids[idp + r.idref]) return;
+        if (!first && r.linear !== 'no') first = idToHref[r.idref];
+        spineRefs.push({ idref: idp + r.idref, linear: r.linear });
+        stats.spine++;
+      });
+      if (!b.spine.length) warnings.push('「' + b.name + '」沒有閱讀順序（spine），內容可能無法顯示。');
+
+      if (i === 0 && b.coverId && ids[idp + b.coverId]) coverMeta = '<meta name="cover" content="' + esc(idp + b.coverId) + '"/>';
+
+      var missing = 0;
+      var mapNode = function (n) {
+        var h = null;
+        if (n.path) {
+          if (copied[n.path]) h = pre + encPath(n.path) + (n.frag ? '#' + n.frag : '');
+          else missing++;
+        }
+        return { title: n.title, href: h, children: n.children.map(mapNode) };
+      };
+      var mapped = b.toc.map(mapNode);
+      if (missing) warnings.push('「' + b.name + '」的目錄有 ' + missing + ' 個項目指向不存在的檔案，已改成不可點選。');
+      if (!b.toc.length) warnings.push('「' + b.name + '」沒有可用的目錄，只會加入一個項目。');
+
+      if (opts.group || !mapped.length) {
+        tocTop.push({ title: b.label || b.title || b.name, href: first, children: mapped });
+      } else {
+        mapped.forEach(function (n) { tocTop.push(n); });
+      }
+    }
+
+    manifest.forEach(function (m) {
+      if (m.fallback && !ids[m.fallback]) m.fallback = null;
+      if (m.mo && !ids[m.mo]) m.mo = null;
+    });
+    stats.toc = countToc(tocTop);
+
+    var bookId = 'urn:uuid:' + uuid();
+    var modified = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    var lang = esc(opts.lang);
+    var title = esc(opts.title);
+
+    function navList(nodes) {
+      if (!nodes.length) return '';
+      return '<ol>' + nodes.map(function (n) {
+        var t = esc(n.title || '(無標題)');
+        var inner = n.href ? '<a href="' + esc(n.href) + '">' + t + '</a>' : '<span>' + t + '</span>';
+        return '<li>' + inner + navList(n.children) + '</li>';
+      }).join('') + '</ol>';
+    }
+    var order = 0, depth = 0;
+    function ncxPoints(nodes, d, fallback) {
+      if (d > depth) depth = d;
+      return nodes.map(function (n) {
+        var h = n.href || firstHref(n) || fallback;
+        order++;
+        var id = 'np' + order;
+        return '<navPoint id="' + id + '" playOrder="' + order + '"><navLabel><text>' + esc(n.title || '(無標題)') + '</text></navLabel><content src="' + esc(h) + '"/>' + ncxPoints(n.children, d + 1, h) + '</navPoint>';
+      }).join('');
+    }
+    var fallbackHref = manifest.length ? manifest[0].href : '';
+    var points = ncxPoints(tocTop, 1, fallbackHref);
+
+    var navXml = '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE html>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" lang="' + lang + '" xml:lang="' + lang + '"><head><meta charset="utf-8"/><title>目錄</title></head><body><nav epub:type="toc" id="toc"><h1>目錄</h1>' + navList(tocTop) + '</nav></body></html>';
+    var ncxXml = '<?xml version="1.0" encoding="UTF-8"?>\n<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="' + bookId + '"/><meta name="dtb:depth" content="' + depth + '"/><meta name="dtb:totalPageCount" content="0"/><meta name="dtb:maxPageNumber" content="0"/></head><docTitle><text>' + title + '</text></docTitle><navMap>' + points + '</navMap></ncx>';
+
+    var opfXml = '<?xml version="1.0" encoding="UTF-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="bookid" xml:lang="' + lang + '"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/">' +
+      '<dc:identifier id="bookid">' + bookId + '</dc:identifier>' +
+      '<dc:title>' + title + '</dc:title>' +
+      (opts.author ? '<dc:creator>' + esc(opts.author) + '</dc:creator>' : '') +
+      '<dc:language>' + lang + '</dc:language>' +
+      '<meta property="dcterms:modified">' + modified + '</meta>' + coverMeta +
+      '</metadata><manifest>' +
+      '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' +
+      '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>' +
+      manifest.map(function (m) {
+        return '<item id="' + esc(m.id) + '" href="' + esc(m.href) + '" media-type="' + esc(m.type) + '"' +
+          (m.props.length ? ' properties="' + esc(m.props.join(' ')) + '"' : '') +
+          (m.fallback ? ' fallback="' + esc(m.fallback) + '"' : '') +
+          (m.mo ? ' media-overlay="' + esc(m.mo) + '"' : '') + '/>';
+      }).join('') +
+      '</manifest><spine toc="ncx">' +
+      spineRefs.map(function (r) { return '<itemref idref="' + esc(r.idref) + '"' + (r.linear === 'no' ? ' linear="no"' : '') + '/>'; }).join('') +
+      '</spine></package>';
+
+    put('OEBPS/nav.xhtml', navXml);
+    put('OEBPS/toc.ncx', ncxXml);
+    put('OEBPS/content.opf', opfXml);
+
+    progress('壓縮中…');
+    await tick();
+    var blob = await out.generateAsync({ type: 'blob', mimeType: 'application/epub+zip', compression: 'DEFLATE', compressionOptions: { level: 6 } });
+    var name = opts.title.replace(/[\\/:*?"<>|\r\n]+/g, '_').trim() || 'merged';
+    return { blob: blob, filename: name + '.epub', stats: stats, warnings: warnings };
+  }
+
+  /* ---------- UI ---------- */
+
+  var state = { books: [], touched: {}, busy: false, result: null };
+  var uid = 0;
+  var statusEl = $('#status');
+
+  function setStatus(msg, kind) {
+    statusEl.textContent = msg || '';
+    statusEl.dataset.kind = kind || '';
+    statusEl.hidden = !msg;
+  }
+  function mk(tag, cls, text) {
+    var e = document.createElement(tag);
+    if (cls) e.className = cls;
+    if (text != null) e.textContent = text;
+    return e;
+  }
+  function clearResult() {
+    state.result = null;
+    $('#result').hidden = true;
+    $('#warns').hidden = true;
+  }
+  function move(i, d) {
+    var j = i + d;
+    if (j < 0 || j >= state.books.length) return;
+    var t = state.books[i]; state.books[i] = state.books[j]; state.books[j] = t;
+    clearResult(); render();
+  }
+
+  function render() {
+    var ol = $('#list');
+    ol.textContent = '';
+    $('#empty').hidden = state.books.length > 0;
+    state.books.forEach(function (b, i) {
+      var li = mk('li', 'book');
+      li.appendChild(mk('span', 'num', String(i + 1)));
+
+      var body = mk('div');
+      body.appendChild(mk('div', 'fname', b.name));
+      body.appendChild(mk('div', 'meta',
+        'EPUB ' + b.version + ' · ' + (b.title || '(無書名)') + ' · 閱讀項目 ' + b.spine.length + ' · 目錄 ' + b.tocCount + ' 項 · ' + fmtSize(b.file.size)));
+      var row = mk('div', 'labelrow');
+      var lid = 'lbl-' + b.uid;
+      var lab = mk('label', null, '目錄區塊名稱');
+      lab.htmlFor = lid;
+      var inp = mk('input');
+      inp.type = 'text'; inp.id = lid; inp.value = b.label; inp.autocomplete = 'off';
+      inp.addEventListener('input', function () { b.label = inp.value; });
+      row.appendChild(lab); row.appendChild(inp);
+      body.appendChild(row);
+      li.appendChild(body);
+
+      var act = mk('div', 'row-actions');
+      var specs = [
+        ['↑', '往前移', function () { move(i, -1); }, i === 0],
+        ['↓', '往後移', function () { move(i, 1); }, i === state.books.length - 1],
+        ['✕', '移除', function () { state.books.splice(i, 1); clearResult(); render(); }, false]
+      ];
+      specs.forEach(function (s) {
+        var btn = mk('button', null, s[0]);
+        btn.type = 'button'; btn.title = s[1]; btn.setAttribute('aria-label', s[1] + '：' + b.name);
+        btn.disabled = s[3];
+        btn.addEventListener('click', s[2]);
+        act.appendChild(btn);
+      });
+      li.appendChild(act);
+      ol.appendChild(li);
+    });
+
+    var f = state.books[0];
+    if (!state.touched.title) $('#m-title').value = f ? (f.title || f.name.replace(/\.epub$/i, '')) : '';
+    if (!state.touched.author) $('#m-author').value = f ? f.author : '';
+    if (!state.touched.lang) $('#m-lang').value = f ? (f.lang || 'zh-TW') : '';
+    updateButtons();
+  }
+
+  function updateButtons() {
+    var n = state.books.length;
+    $('#btn-merge').disabled = state.busy || n < 2;
+    $('#btn-sort').disabled = state.busy || n < 2;
+    $('#merge-hint').textContent = n < 2 ? '至少需要兩個檔案。' : '將依上方 1 → ' + n + ' 的順序合併。';
+  }
+
+  async function addFiles(files) {
+    var list = Array.prototype.slice.call(files).filter(function (f) {
+      return /\.epub$/i.test(f.name) || f.type === 'application/epub+zip';
+    });
+    if (!list.length) { setStatus('請選擇 .epub 檔案。', 'error'); return; }
+    setStatus('讀取 ' + list.length + ' 個檔案…');
+    var errors = [];
+    for (var i = 0; i < list.length; i++) {
+      try {
+        var b = await readBook(list[i]);
+        b.uid = ++uid;
+        b.label = b.title || b.name.replace(/\.epub$/i, '');
+        state.books.push(b);
+      } catch (e) {
+        errors.push(list[i].name + '：' + (e && e.message ? e.message : e));
+      }
+    }
+    clearResult(); render();
+    setStatus(errors.join('\n'), errors.length ? 'error' : '');
+  }
+
+  function showResult(res) {
+    var s = res.stats;
+    var dl = $('#stats');
+    dl.textContent = '';
+    [['合併檔案', s.books], ['內容檔案', s.files], ['閱讀項目', s.spine], ['目錄項目', s.toc], ['輸出大小', fmtSize(res.blob.size)]].forEach(function (p) {
+      var d = mk('div');
+      d.appendChild(mk('dt', null, p[0]));
+      d.appendChild(mk('dd', null, String(p[1])));
+      dl.appendChild(d);
+    });
+    $('#out-name').textContent = res.filename;
+    $('#dl-hint').hidden = true;
+    $('#result').hidden = false;
+    var w = $('#warns');
+    w.textContent = '';
+    res.warnings.forEach(function (m) { w.appendChild(mk('li', null, m)); });
+    w.hidden = !res.warnings.length;
+  }
+
+  async function onMerge() {
+    if (state.busy || state.books.length < 2) return;
+    state.busy = true; updateButtons(); clearResult(); setStatus('合併中…');
+    try {
+      var opts = {
+        title: $('#m-title').value.trim() || '合併後的書',
+        author: $('#m-author').value.trim(),
+        lang: $('#m-lang').value.trim() || 'zh-TW',
+        group: $('#o-group').checked
+      };
+      var res = await mergeBooks(state.books, opts, function (m) { setStatus(m); });
+      state.result = res;
+      showResult(res);
+      setStatus('');
+    } catch (e) {
+      console.error(e);
+      setStatus('合併失敗：' + (e && e.message ? e.message : e), 'error');
+    } finally {
+      state.busy = false; updateButtons();
+    }
+  }
+
+  var dlPromise = (window.claude && typeof window.claude.use === 'function')
+    ? window.claude.use('downloads').catch(function () { return null; })
+    : Promise.resolve(null);
+
+  function anchorDownload(res) {
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(res.blob);
+    a.download = res.filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(function () { URL.revokeObjectURL(a.href); }, 10000);
+  }
+
+  async function onDownload() {
+    var res = state.result;
+    if (!res) return;
+    var dl = await dlPromise;
+    if (dl) {
+      try {
+        await dl.save({ filename: res.filename, data: res.blob });
+        return;
+      } catch (e) {
+        if (e && e.code === 'declined') return;
+        if (e && e.code === 'rate_limited') { setStatus('上一個儲存視窗還沒處理，請稍後再試。'); return; }
+        $('#dl-hint').hidden = false;
+        return;
+      }
+    }
+    anchorDownload(res);
+    if (window.claude) $('#dl-hint').hidden = false;
+  }
+
+  /* ---------- sample books ---------- */
+
+  var DEMO = [
+    { title: '示範之書（上）', ch: [['第一章 出發', '旅程從一封沒有署名的信開始。'], ['第二章 山路', '雨後的山路很滑，兩個人走得很慢。']] },
+    { title: '示範之書（中）', ch: [['第三章 渡口', '船夫收下銅錢，沒有多問。'], ['第四章 夜市', '燈籠一盞接一盞，一直亮到河邊。']] },
+    { title: '示範之書（下）', ch: [['第五章 回信', '信寫了三次，才決定寄出去。'], ['第六章 終點', '終點其實就在起點旁邊的那條街。']] }
+  ];
+
+  async function demoEpub(idx, v3) {
+    var d = DEMO[idx];
+    var z = new JSZip();
+    var put = function (p, c, o) { z.file(p, c, Object.assign({ createFolders: false }, o || {})); };
+    put('mimetype', 'application/epub+zip', { compression: 'STORE' });
+    put('META-INF/container.xml', CONTAINER.replace('OEBPS/content.opf', 'OEBPS/content.opf'));
+    put('OEBPS/Styles/style.css', 'body{font-family:serif;line-height:1.8}h1{font-size:1.4em}');
+    var items = '', spine = '', navLi = '', points = '';
+    d.ch.forEach(function (c, i) {
+      var n = i + 1;
+      var next = i < d.ch.length - 1 ? '<p><a href="ch' + (n + 1) + '.xhtml">下一章</a></p>' : '';
+      put('OEBPS/Text/ch' + n + '.xhtml',
+        '<?xml version="1.0" encoding="UTF-8"?>\n<html xmlns="http://www.w3.org/1999/xhtml"><head><title>' + c[0] + '</title><link rel="stylesheet" type="text/css" href="../Styles/style.css"/></head><body><h1 id="top">' + c[0] + '</h1><p>' + c[1] + '</p>' + next + '</body></html>');
+      items += '<item id="c' + n + '" href="Text/ch' + n + '.xhtml" media-type="application/xhtml+xml"/>';
+      spine += '<itemref idref="c' + n + '"/>';
+      navLi += '<li><a href="Text/ch' + n + '.xhtml">' + c[0] + '</a></li>';
+      points += '<navPoint id="n' + n + '" playOrder="' + n + '"><navLabel><text>' + c[0] + '</text></navLabel><content src="Text/ch' + n + '.xhtml"/></navPoint>';
+    });
+    var opf = '<?xml version="1.0" encoding="UTF-8"?>\n<package xmlns="http://www.idpf.org/2007/opf" version="' + (v3 ? '3.0' : '2.0') + '" unique-identifier="uid"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="uid">urn:uuid:demo-' + idx + '</dc:identifier><dc:title>' + d.title + '</dc:title><dc:creator>示範作者</dc:creator><dc:language>zh-TW</dc:language>' + (v3 ? '<meta property="dcterms:modified">2026-01-01T00:00:00Z</meta>' : '') + '</metadata><manifest>' +
+      (v3 ? '<item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>' : '<item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>') +
+      '<item id="css" href="Styles/style.css" media-type="text/css"/>' + items + '</manifest><spine' + (v3 ? '' : ' toc="ncx"') + '>' + spine + '</spine></package>';
+    put('OEBPS/content.opf', opf);
+    if (v3) {
+      put('OEBPS/nav.xhtml', '<?xml version="1.0" encoding="UTF-8"?>\n<html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops"><head><title>目錄</title></head><body><nav epub:type="toc"><ol>' + navLi + '</ol></nav></body></html>');
+    } else {
+      put('OEBPS/toc.ncx', '<?xml version="1.0" encoding="UTF-8"?>\n<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1"><head><meta name="dtb:uid" content="demo-' + idx + '"/></head><docTitle><text>' + d.title + '</text></docTitle><navMap>' + points + '</navMap></ncx>');
+    }
+    var blob = await z.generateAsync({ type: 'blob', mimeType: 'application/epub+zip' });
+    return new File([blob], '示範之書-' + (idx + 1) + '.epub', { type: 'application/epub+zip' });
+  }
+
+  async function loadDemo() {
+    setStatus('產生範例檔…');
+    var files = [await demoEpub(2, true), await demoEpub(0, false), await demoEpub(1, false)];
+    await addFiles(files);
+    setStatus('已載入範例：順序是下、上、中。請用 ↑ ↓ 或「依檔名排序」排成 1、2、3，再按合併。');
+  }
+
+  /* ---------- wiring ---------- */
+
+  if (typeof JSZip === 'undefined') {
+    setStatus('無法載入 JSZip 函式庫，請確認網路連線後重新整理。', 'error');
+    ['#btn-demo', '#btn-sort', '#btn-merge'].forEach(function (s) { $(s).disabled = true; });
+  } else {
+    var drop = $('#drop'), file = $('#file');
+    drop.addEventListener('click', function () { file.click(); });
+    drop.addEventListener('keydown', function (e) { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); file.click(); } });
+    file.addEventListener('change', function () { addFiles(file.files).then(function () { file.value = ''; }); });
+    ['dragenter', 'dragover'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.add('over'); }); });
+    ['dragleave', 'drop'].forEach(function (t) { drop.addEventListener(t, function (e) { e.preventDefault(); drop.classList.remove('over'); }); });
+    drop.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files) addFiles(e.dataTransfer.files); });
+    $('#btn-sort').addEventListener('click', function () {
+      state.books.sort(function (a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); });
+      clearResult(); render();
+    });
+    $('#btn-demo').addEventListener('click', loadDemo);
+    $('#btn-merge').addEventListener('click', onMerge);
+    $('#btn-dl').addEventListener('click', onDownload);
+    [['#m-title', 'title'], ['#m-author', 'author'], ['#m-lang', 'lang']].forEach(function (p) {
+      $(p[0]).addEventListener('input', function () { state.touched[p[1]] = true; });
+    });
+    render();
+  }
+})();
+</script>
